@@ -1,6 +1,7 @@
 import sys
 import atexit
 import logging
+from random import choice
 from fileinput import FileInput
 
 # control browser
@@ -13,27 +14,16 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-from voucher_generator import PARENT_DIR, VOUCHER_DIR
-
-# Setup logging
-LOGS_DIR = PARENT_DIR / "logs"
-LOGS_DIR.mkdir(exist_ok=True)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler(LOGS_DIR / "logs.txt", mode='w'), logging.StreamHandler()],
-)
-
-URL = "http://175.1.1.1/"
-DRIVER_PATH = "C:/coding/python/tools/chromedriver-win64/chromedriver"
+from configs import VOUCHER_DIR, configure_logging
 
 
 class VoucherConnector:
-    def __init__(self, url, driver_path, source_dir):
-        self.url = url
-        self.driver_path = driver_path
-        self.voucher_sources = list(source_dir.glob("*"))
+    URL = "http://175.1.1.1/"
+    DRIVER_PATH = "C:/coding/python/tools/chromedriver-win64/chromedriver"
+
+    def __init__(self, url=None, driver_path=None):
+        self.url = url or self.URL
+        self.driver_path = driver_path or self.DRIVER_PATH
         self.used_vouchers = []
 
     def get_driver(self):
@@ -50,35 +40,6 @@ class VoucherConnector:
                     if voucher.strip() not in self.used_vouchers:
                         print(voucher.strip(), end="\n")
             logging.info("Done!")
-
-    def get_source_index(self):
-        source_index = None
-        source_indices = list(range(1, len(self.voucher_sources) + 1))
-        while source_index not in source_indices:
-            try:
-                source_index = int(input("> "))
-            except ValueError:
-                continue
-        return source_index - 1
-
-    def get_source(self):
-        print("Choose voucher source")
-        for index, file in enumerate(self.voucher_sources, start=1):
-            print(index, file.name)
-
-        voucher_source = self.voucher_sources[self.get_source_index()]
-
-        if voucher_source.is_dir():
-            print("Choose what letter to use: ")
-            while True:
-                chosen_letter = input("> ")
-                if not chosen_letter or not chosen_letter.isalpha():
-                    print("Enter a letter.")
-                    continue
-                voucher_source = voucher_source / chosen_letter
-                break
-
-        return voucher_source
 
     def connect(self, voucher):
         logging.info(f"Trying to connect with voucher: {voucher}")
@@ -107,37 +68,90 @@ class VoucherConnector:
         finally:
             self.used_vouchers.append(voucher)
 
-    def run(self):
-        voucher_source = self.get_source()
-        if voucher_source.is_dir():
-            for source in set(voucher_source.glob('*.txt')):
-                self.source_file = source
-                print(source)
-                with open(source, "r") as vouchers:
-                    x = 0
-                    vouchers_to_use = []
-                    for voucher in (vouchers):
-                        x += 1
-                        vouchers_to_use.append(voucher.strip())
-                        if x == 10:
-                            break
-                    for voucher in vouchers_to_use:
-                        self.connect(voucher)
-                self.remove_used()
-        else:
+    def connect_from_dir(self, voucher_source):
+        for source in set(voucher_source.glob('*.txt')):
+            self.source_file = source
+            logging.info(f'Current source file: {self.source_file.name}')
             with open(self.source_file, "r") as vouchers:
-                vouchers = {voucher.strip() for voucher in vouchers if voucher.strip()}
-                for voucher in self.vouchers:
-                    self.connect(voucher)
+                vouchers = [voucher.strip() for voucher in set(vouchers.readlines()) if voucher.strip()][:10]
+                for voucher in vouchers:
+                    driver = self.connect(voucher)
+                    if driver:
+                        return driver
+                self.remove_used()
+
+    def connect_from_file(self, voucher_source):
+        self.source_file = voucher_source
+        logging.info(f'Current source file: {self.source_file.name}')
+        with open(self.source_file, "r") as vouchers:
+            vouchers = {voucher.strip() for voucher in vouchers if voucher.strip()}
+            for voucher in vouchers:
+                driver = self.connect(voucher)
+                if driver:
+                    return driver
+            self.remove_used()
+
+    def run(self):
+        voucher_source = get_source()
+        if voucher_source.is_dir():
+            driver = self.connect_from_dir(voucher_source)
+        else:
+            driver = self.connect_from_file(voucher_source)
+        if driver:
+            return driver
 
         logging.error("All vouchers failed. Unable to establish a successful connection.")
         return None
 
 
+def get_source(voucher_dir=VOUCHER_DIR):
+    voucher_sources = list(voucher_dir.glob("*"))
+
+    def get_source_index():
+        source_index = None
+        source_indices = list(range(1, len(voucher_sources) + 1))
+        while source_index not in source_indices:
+            try:
+                source_index = int(input("> "))
+            except ValueError:
+                continue
+        return source_index - 1
+
+    print("Choose voucher source")
+    for index, file in enumerate(voucher_sources, start=1):
+        print(index, file.name)
+
+    voucher_source = voucher_sources[get_source_index()]
+
+    if voucher_source.is_dir():
+        print("Choose letters to use: ")
+        while True:
+            chosen_letter = input("> ")
+            if not chosen_letter or not chosen_letter.isalpha():
+                print("Enter a letter.")
+                continue
+            letter_directory = voucher_source / chosen_letter[0]
+            if len(chosen_letter) == 1:
+                return letter_directory
+
+            source_files = list(letter_directory.glob("*.txt"))
+            letters_count = len([letter for letter in source_files[0].stem if letter.isalpha()])
+            if len(chosen_letter) > letters_count:
+                print(f"Enter up to {letters_count} letters.")
+                continue
+            voucher_source = choice([file for file in source_files if file.name.startswith(chosen_letter)])
+            if voucher_source.exists():
+                break
+            print(f"No matched file for letter {chosen_letter}.")
+
+    return voucher_source
+
+
 def connect_vouchers():
+    configure_logging(logging.INFO)
     driver = None
     try:
-        voucher_connector = VoucherConnector(URL, DRIVER_PATH, VOUCHER_DIR)
+        voucher_connector = VoucherConnector()
         driver = voucher_connector.run()
     except Exception as e:
         logging.error(f"An error occured, {e}")
@@ -145,7 +159,7 @@ def connect_vouchers():
         logging.info("Script terminated.")
     else:
         if driver:
-            webbrowser.open(URL)
+            webbrowser.open(VoucherConnector.URL)
     finally:
         if driver:
             driver.quit()
