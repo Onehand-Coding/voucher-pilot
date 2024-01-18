@@ -61,6 +61,7 @@ class VoucherConnector:
             logging.error(f"An error occurred while connecting with voucher {voucher}: {e}")
             driver.quit()
         except KeyboardInterrupt:
+            driver.quit()
             raise
         else:
             logging.info("Connection successful!")
