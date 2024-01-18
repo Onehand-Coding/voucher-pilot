@@ -78,7 +78,7 @@ class VoucherConnector:
                     driver = self.connect(voucher)
                     if driver:
                         return driver
-                self.remove_used()
+            self.remove_used()
 
     def connect_from_file(self, voucher_source):
         self.source_file = voucher_source
@@ -89,7 +89,7 @@ class VoucherConnector:
                 driver = self.connect(voucher)
                 if driver:
                     return driver
-            self.remove_used()
+        self.remove_used()
 
     def run(self):
         voucher_source = get_source()
