@@ -69,6 +69,7 @@ voucher-pilot/
 │   └── generator.py     # Voucher generation logic
 ├── vouchers/            # Generated voucher files
 ├── logs/               # Application logs
+├── tests/               # Test suite
 ├── pyproject.toml      # Project configuration
 └── .env               # Local environment settings
 ```
