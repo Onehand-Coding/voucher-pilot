@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "voucher-pilot"
+version = "0.1.0"
+description = "A script to generate and test hotspot vouchers."
+authors = [
+    {name = "Onehand-Coding", email = "onehand.coding433@gmail.com"},
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "selenium==4.8.3",
+    "python-dotenv",
+]
+
+[project.scripts]
+voucher-pilot = "voucher_pilot.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voucher_pilot"]

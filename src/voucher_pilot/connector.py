@@ -1,5 +1,6 @@
 import sys
 import atexit
+import shutil
 import logging
 from random import choice
 from fileinput import FileInput
@@ -14,23 +15,44 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-from configs import VOUCHER_DIR, configure_logging
+from . import config
 
 
 class VoucherConnector:
-    URL = "http://175.1.1.1/"
-    DRIVER_PATH = "C:/coding/python/tools/chromedriver-win64/chromedriver"
-
-    def __init__(self, url=None, driver_path=None):
-        self.url = url or self.URL
-        self.driver_path = driver_path or self.DRIVER_PATH
+    def __init__(self):
+        self.url = config.URL
+        self.driver_path = config.DRIVER_PATH
         self.used_vouchers = []
 
     def get_driver(self):
+        """
+        Initializes the Selenium WebDriver, using a configured path
+        or falling back to auto-detection.
+        """
         chrome_options = Options()
-        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless=new")
 
-        return webdriver.Chrome(service=Service(self.driver_path), options=chrome_options)
+        browser_path = config.CHROME_BINARY_PATH
+
+        if browser_path:
+            logging.info(f"Using configured browser path: {browser_path}")
+            chrome_options.binary_location = browser_path
+        else:
+            logging.info("No configured browser path, attempting auto-detection...")
+            known_browsers = ["brave-browser", "google-chrome", "chromium-browser"]
+            for browser in known_browsers:
+                path = shutil.which(browser)
+                if path:
+                    logging.info(f"Auto-detected browser: '{browser}' at {path}")
+                    chrome_options.binary_location = path
+                    break
+
+        if not chrome_options.binary_location:
+             logging.error("Could not find a browser. Please set CHROME_BINARY_PATH in your .env file.")
+             raise Exception("Browser not found.")
+
+        logging.info("Initializing WebDriver...")
+        return webdriver.Chrome(options=chrome_options)
 
     def remove_used(self):
         if self.used_vouchers:
@@ -43,38 +65,65 @@ class VoucherConnector:
 
     def connect(self, voucher):
         logging.info(f"Trying to connect with voucher: {voucher}")
-        driver = self.get_driver()
-        driver.get(self.url)
-
-        voucher_input = driver.find_element(By.ID, "voucherInput")
-        voucher_input.clear()
-        voucher_input.send_keys(voucher)
-        driver.find_element(By.ID, "connectBtn").click()
+        driver = None  # Define driver here to ensure it's available in except blocks
         try:
+            driver = self.get_driver()
+
+            logging.info(f"Attempting to open URL: {self.url}")
+            driver.get(self.url)
+            logging.info("URL opened successfully. Searching for voucher input field...")
+
+            # Find and interact with the voucher input field
+            voucher_input = driver.find_element(By.ID, "voucherInput")
+            logging.info("Voucher input field found.")
+            voucher_input.clear()
+            voucher_input.send_keys(voucher)
+
+            # Find and click the connect button
+            connect_button = driver.find_element(By.ID, "connectBtn")
+            logging.info("Connect button found. Clicking to submit voucher...")
+            connect_button.click()
+
+            # Wait for the connection status to update
+            logging.info("Waiting for connection status...")
             WebDriverWait(driver, 5).until(
-                EC.text_to_be_present_in_element((By.ID, "connectionStatus"), "Connected")
+                EC.text_to_be_present_in_element(
+                    (By.ID, "connectionStatus"), "Connected"
+                )
             )
         except TimeoutException:
-            logging.error(f"Connection failed with voucher {voucher}. Retrying with another voucher.")
-            driver.quit()
+            # This error is specific and expected
+            logging.error(f"Connection failed with voucher '{voucher}': Timed out waiting for 'Connected' status.")
+            if driver:
+                driver.quit()
         except Exception as e:
-            logging.error(f"An error occurred while connecting with voucher {voucher}: {e}")
-            driver.quit()
+            # This catches other potential errors during the process
+            logging.error(f"An unexpected error occurred while processing voucher '{voucher}': {e}")
+            if driver:
+                driver.quit()
         except KeyboardInterrupt:
-            driver.quit()
-            raise
+            logging.info("Connection attempt cancelled by user.")
+            if driver:
+                driver.quit()
+            raise  # Re-raise the exception so the main loop can catch it
         else:
+            # This block only runs if the try block completes without errors
             logging.info("Connection successful!")
             return driver
         finally:
+            # This will always run
             self.used_vouchers.append(voucher)
 
     def connect_from_dir(self, voucher_source):
-        for source in set(voucher_source.glob('*.txt')):
+        for source in set(voucher_source.glob("*.txt")):
             self.source_file = source
-            logging.info(f'Current source file: {self.source_file.name}')
+            logging.info(f"Current source file: {self.source_file.name}")
             with open(self.source_file, "r") as vouchers:
-                vouchers = [voucher.strip() for voucher in set(vouchers.readlines()) if voucher.strip()][:10]
+                vouchers = [
+                    voucher.strip()
+                    for voucher in set(vouchers.readlines())
+                    if voucher.strip()
+                ][:10]
                 for voucher in vouchers:
                     driver = self.connect(voucher)
                     if driver:
@@ -83,7 +132,7 @@ class VoucherConnector:
 
     def connect_from_file(self, voucher_source):
         self.source_file = voucher_source
-        logging.info(f'Current source file: {self.source_file.name}')
+        logging.info(f"Current source file: {self.source_file.name}")
         with open(self.source_file, "r") as vouchers:
             vouchers = {voucher.strip() for voucher in vouchers if voucher.strip()}
             for voucher in vouchers:
@@ -101,11 +150,13 @@ class VoucherConnector:
         if driver:
             return driver
 
-        logging.error("All vouchers failed. Unable to establish a successful connection.")
+        logging.error(
+            "All vouchers failed. Unable to establish a successful connection."
+        )
         return None
 
 
-def get_source(voucher_dir=VOUCHER_DIR):
+def get_source(voucher_dir=config.VOUCHER_DIR):
     voucher_sources = list(voucher_dir.glob("*"))
 
     def get_source_index():
@@ -136,11 +187,15 @@ def get_source(voucher_dir=VOUCHER_DIR):
                 return letter_directory
 
             source_files = list(letter_directory.glob("*.txt"))
-            letters_count = len([letter for letter in source_files[0].stem if letter.isalpha()])
+            letters_count = len(
+                [letter for letter in source_files[0].stem if letter.isalpha()]
+            )
             if len(chosen_letter) > letters_count:
                 print(f"Enter up to {letters_count} letters.")
                 continue
-            voucher_source = choice([file for file in source_files if file.name.startswith(chosen_letter)])
+            voucher_source = choice(
+                [file for file in source_files if file.name.startswith(chosen_letter)]
+            )
             if voucher_source.exists():
                 break
             print(f"No matched file for letter {chosen_letter}.")
@@ -149,7 +204,7 @@ def get_source(voucher_dir=VOUCHER_DIR):
 
 
 def connect_vouchers():
-    configure_logging(logging.INFO)
+    config.configure_logging(logging.INFO)
     driver = None
     try:
         voucher_connector = VoucherConnector()
