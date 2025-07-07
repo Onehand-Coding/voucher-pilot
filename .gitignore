@@ -4,5 +4,6 @@ __pycache__/
 logs/
 vouchers/
 .ruff_cache/
+.pytest_cache/
 .env
 
