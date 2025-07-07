@@ -16,6 +16,12 @@ dependencies = [
     "python-dotenv",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-mock",
+]
+
 [project.scripts]
 voucher-pilot = "voucher_pilot.cli:main"
 

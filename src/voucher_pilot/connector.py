@@ -143,6 +143,8 @@ class VoucherConnector:
 
     def run(self):
         voucher_source = get_source()
+        if not voucher_source:
+            return None
         if voucher_source.is_dir():
             driver = self.connect_from_dir(voucher_source)
         else:
@@ -157,7 +159,15 @@ class VoucherConnector:
 
 
 def get_source(voucher_dir=config.VOUCHER_DIR):
+    """
+    Lets the user select a voucher source, intelligently handling both
+    simple and complex (nested) chunking structures.
+    """
     voucher_sources = list(voucher_dir.glob("*"))
+    if not voucher_sources:
+        print("Error: The 'vouchers' directory is empty.")
+        print("Please use the 'generate' command to create a voucher file first.")
+        return None
 
     def get_source_index():
         source_index = None
@@ -165,40 +175,64 @@ def get_source(voucher_dir=config.VOUCHER_DIR):
         while source_index not in source_indices:
             try:
                 source_index = int(input("> "))
-            except ValueError:
+            except (ValueError, IndexError):
                 continue
         return source_index - 1
 
-    print("Choose voucher source")
+    print("\nChoose voucher source:")
     for index, file in enumerate(voucher_sources, start=1):
-        print(index, file.name)
+        print(f"{index}: {file.name}")
 
     voucher_source = voucher_sources[get_source_index()]
 
-    if voucher_source.is_dir():
-        print("Choose letters to use: ")
+    if not voucher_source.is_dir():
+        return voucher_source
+
+    print(f"\nSelected directory: {voucher_source.name}")
+
+    is_simple_chunk_dir = any(item.is_file() and item.suffix == '.txt' for item in voucher_source.iterdir())
+
+    if is_simple_chunk_dir:
+        print("This appears to be a directory of simple chunks.")
+        print("Choose a starting letter to use:")
+        chosen_letter = input("> ").lower().strip()
+
+        target_file = voucher_source / f"{chosen_letter}.txt"
+        if target_file.exists():
+            return target_file
+        else:
+            print(f"Error: Chunk file '{target_file.name}' not found.")
+            return None
+
+    else:
+        print("This appears to be a directory of nested chunks.")
+        print("Choose letters to use (e.g., 'a' for a full directory, or 'ab' for a specific file):")
+
         while True:
-            chosen_letter = input("> ")
+            chosen_letter = input("> ").lower().strip()
             if not chosen_letter or not chosen_letter.isalpha():
-                print("Enter a letter.")
+                print("Invalid input. Please enter only letters.")
                 continue
+
             letter_directory = voucher_source / chosen_letter[0]
+            if not letter_directory.is_dir():
+                print(f"No chunk directory found for letter '{chosen_letter[0]}'.")
+                continue
+
             if len(chosen_letter) == 1:
                 return letter_directory
 
             source_files = list(letter_directory.glob("*.txt"))
-            letters_count = len(
-                [letter for letter in source_files[0].stem if letter.isalpha()]
-            )
-            if len(chosen_letter) > letters_count:
-                print(f"Enter up to {letters_count} letters.")
+            if not source_files:
+                print(f"No .txt files found in {letter_directory.name}")
                 continue
-            voucher_source = choice(
-                [file for file in source_files if file.name.startswith(chosen_letter)]
-            )
-            if voucher_source.exists():
-                break
-            print(f"No matched file for letter {chosen_letter}.")
+
+            matched_file = next((f for f in source_files if f.name.startswith(chosen_letter)), None)
+
+            if matched_file:
+                return matched_file
+            else:
+                print(f"No matched file for prefix '{chosen_letter}' in {letter_directory.name}.")
 
     return voucher_source
 
