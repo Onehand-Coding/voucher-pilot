@@ -99,9 +99,7 @@ class VoucherConnector:
             )
         except TimeoutException:
             # This error is specific and expected
-            logging.error(
-                f"Connection failed with voucher '{voucher}': Timed out waiting for 'Connected' status."
-            )
+            logging.error("Connection failed: timed out waiting for 'Connected' status.")
             if driver:
                 driver.quit()
         except Exception as e:

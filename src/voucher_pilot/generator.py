@@ -211,6 +211,13 @@ class VoucherFileManager:
                 if prefix:
                     grouped_vouchers.setdefault(prefix, []).append(line)
 
+        if not grouped_vouchers:
+            logging.warning(
+                "No alphabetic prefixes found; falling back to first-character chunking."
+            )
+            self.chunk_file_generic()
+            return
+
         logging.info(f"Discovered {len(grouped_vouchers)} unique prefixes. Now chunking file...")
 
         chunk_directory = self.output_path.parent / f"{self.output_path.stem}_chunks"

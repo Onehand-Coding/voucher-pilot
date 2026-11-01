@@ -119,3 +119,16 @@ def test_generate_random_rejects_duplicate_charset(generator):
 def test_generate_random_rejects_digit_overlap(generator):
     with pytest.raises(ValueError, match="overlap"):
         generator.generate_random_combinations(3, 1, 2, "a1")
+
+
+def test_chunk_by_prefix_analysis_digits_only_falls_back(tmp_path):
+    from voucher_pilot.generator import VoucherFileManager
+
+    voucher_file = tmp_path / "random.txt"
+    voucher_file.write_text("11\n12\n21\n")
+
+    VoucherFileManager(voucher_file).chunk_file_by_prefix_analysis()
+
+    chunk_dir = tmp_path / "random_chunks"
+    assert (chunk_dir / "1.txt").read_text().splitlines() == ["11", "12"]
+    assert (chunk_dir / "2.txt").read_text().splitlines() == ["21"]
