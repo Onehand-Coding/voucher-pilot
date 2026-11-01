@@ -1,19 +1,16 @@
-import sys
-import atexit
-import shutil
 import logging
-from random import choice
-from fileinput import FileInput
+import shutil
 
 # control browser
 import webbrowser
+from fileinput import FileInput
+
 from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 from . import config
 
@@ -22,6 +19,7 @@ class VoucherConnector:
     def __init__(self):
         self.url = config.URL
         self.driver_path = config.DRIVER_PATH
+        self.source_file = None
         self.used_vouchers = []
 
     def get_driver(self):
@@ -48,13 +46,17 @@ class VoucherConnector:
                     break
 
         if not chrome_options.binary_location:
-             logging.error("Could not find a browser. Please set CHROME_BINARY_PATH in your .env file.")
-             raise Exception("Browser not found.")
+            logging.error(
+                "Could not find a browser. Please set CHROME_BINARY_PATH in your .env file."
+            )
+            raise Exception("Browser not found.")
 
         logging.info("Initializing WebDriver...")
         return webdriver.Chrome(options=chrome_options)
 
     def remove_used(self):
+        if self.source_file is None:
+            return
         if self.used_vouchers:
             logging.info("Removing used vouchers...")
             with FileInput(self.source_file, inplace=True) as vouchers:
@@ -87,13 +89,13 @@ class VoucherConnector:
             # Wait for the connection status to update
             logging.info("Waiting for connection status...")
             WebDriverWait(driver, 5).until(
-                EC.text_to_be_present_in_element(
-                    (By.ID, "connectionStatus"), "Connected"
-                )
+                EC.text_to_be_present_in_element((By.ID, "connectionStatus"), "Connected")
             )
         except TimeoutException:
             # This error is specific and expected
-            logging.error(f"Connection failed with voucher '{voucher}': Timed out waiting for 'Connected' status.")
+            logging.error(
+                f"Connection failed with voucher '{voucher}': Timed out waiting for 'Connected' status."
+            )
             if driver:
                 driver.quit()
         except Exception as e:
@@ -120,9 +122,7 @@ class VoucherConnector:
             logging.info(f"Current source file: {self.source_file.name}")
             with open(self.source_file, "r") as vouchers:
                 vouchers = [
-                    voucher.strip()
-                    for voucher in set(vouchers.readlines())
-                    if voucher.strip()
+                    voucher.strip() for voucher in set(vouchers.readlines()) if voucher.strip()
                 ][:10]
                 for voucher in vouchers:
                     driver = self.connect(voucher)
@@ -152,9 +152,7 @@ class VoucherConnector:
         if driver:
             return driver
 
-        logging.error(
-            "All vouchers failed. Unable to establish a successful connection."
-        )
+        logging.error("All vouchers failed. Unable to establish a successful connection.")
         return None
 
 
@@ -190,7 +188,9 @@ def get_source(voucher_dir=config.VOUCHER_DIR):
 
     print(f"\nSelected directory: {voucher_source.name}")
 
-    is_simple_chunk_dir = any(item.is_file() and item.suffix == '.txt' for item in voucher_source.iterdir())
+    is_simple_chunk_dir = any(
+        item.is_file() and item.suffix == ".txt" for item in voucher_source.iterdir()
+    )
 
     if is_simple_chunk_dir:
         print("This appears to be a directory of simple chunks.")
@@ -206,7 +206,9 @@ def get_source(voucher_dir=config.VOUCHER_DIR):
 
     else:
         print("This appears to be a directory of nested chunks.")
-        print("Choose letters to use (e.g., 'a' for a full directory, or 'ab' for a specific file):")
+        print(
+            "Choose letters to use (e.g., 'a' for a full directory, or 'ab' for a specific file):"
+        )
 
         while True:
             chosen_letter = input("> ").lower().strip()
@@ -239,7 +241,13 @@ def get_source(voucher_dir=config.VOUCHER_DIR):
 
 def connect_vouchers():
     config.configure_logging(logging.INFO)
+    print("Only use VoucherPilot on networks you own or are authorized to test.")
+    if input("Type 'yes' to confirm authorization: ").strip().lower() != "yes":
+        logging.info("Authorization not confirmed; exiting.")
+        return
+
     driver = None
+    voucher_connector = None
     try:
         voucher_connector = VoucherConnector()
         driver = voucher_connector.run()
@@ -249,12 +257,12 @@ def connect_vouchers():
         logging.info("Script terminated.")
     else:
         if driver:
-            webbrowser.open(VoucherConnector.URL)
+            webbrowser.open(voucher_connector.url)
     finally:
         if driver:
             driver.quit()
-        atexit.register(voucher_connector.remove_used)
-        sys.exit()
+        if voucher_connector:
+            voucher_connector.remove_used()
 
 
 if __name__ == "__main__":

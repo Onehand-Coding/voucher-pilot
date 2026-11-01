@@ -1,12 +1,15 @@
 # In tests/test_generator.py
 
 import pytest
+
 from voucher_pilot.generator import VoucherGenerator
+
 
 @pytest.fixture
 def generator():
     """Provides a VoucherGenerator instance for testing."""
     return VoucherGenerator()
+
 
 def test_generate_from_pattern(generator):
     """
@@ -24,10 +27,11 @@ def test_generate_from_pattern(generator):
     first_voucher = vouchers[0]
     assert len(first_voucher) == len(pattern)
     assert first_voucher[0].isupper()
-    assert first_voucher[1] == '-'
+    assert first_voucher[1] == "-"
     assert first_voucher[2].isdigit()
-    assert first_voucher[3] == '-'
+    assert first_voucher[3] == "-"
     assert first_voucher[4].islower()
+
 
 def test_generate_random_combinations(generator):
     """
@@ -53,3 +57,37 @@ def test_generate_random_combinations(generator):
 
     assert letter_count == num_letters
     assert digit_count == num_digits
+
+
+def test_generate_random_combinations_rejects_impossible_count(generator):
+    """Requests larger than the possible unique space must fail fast, not hang."""
+    with pytest.raises(ValueError, match="capacity"):
+        generator.generate_random_combinations(2, 2, 91, "ab")
+
+
+def test_generate_from_pattern_rejects_impossible_count(generator):
+    with pytest.raises(ValueError, match="capacity"):
+        generator.generate_from_pattern("L", 27)
+
+
+def test_generate_from_pattern_rejects_literal_only_repeat(generator):
+    with pytest.raises(ValueError, match="capacity"):
+        generator.generate_from_pattern("ABX", 2)
+
+
+def test_generate_rejects_non_positive_count(generator):
+    with pytest.raises(ValueError, match="positive"):
+        generator.generate_from_pattern("L", 0)
+
+
+def test_chunk_all_combinations_writes_prefix_files(tmp_path):
+    from voucher_pilot.generator import VoucherFileManager
+
+    voucher_file = tmp_path / "all.txt"
+    voucher_file.write_text("ABCD11\nABCD12\nABEF11\nABEF12\n")
+
+    VoucherFileManager(voucher_file).chunk_file_for_all_combinations()
+
+    chunk_dir = tmp_path / "all_chunks"
+    assert (chunk_dir / "A" / "ABCD.txt").read_text().splitlines() == ["ABCD11", "ABCD12"]
+    assert (chunk_dir / "A" / "ABEF.txt").read_text().splitlines() == ["ABEF11", "ABEF12"]
