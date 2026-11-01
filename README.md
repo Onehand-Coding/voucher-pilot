@@ -57,7 +57,7 @@ Create `.env` from `.env.example`:
 
 ```env
 # Required: hotspot login URL
-URL="http://175.1.1.1/"
+URL="http://192.168.1.1/"
 
 # Optional: explicit chromedriver path
 # DRIVER_PATH="/usr/local/bin/chromedriver"

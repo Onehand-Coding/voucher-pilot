@@ -89,5 +89,33 @@ def test_chunk_all_combinations_writes_prefix_files(tmp_path):
     VoucherFileManager(voucher_file).chunk_file_for_all_combinations()
 
     chunk_dir = tmp_path / "all_chunks"
-    assert (chunk_dir / "A" / "ABCD.txt").read_text().splitlines() == ["ABCD11", "ABCD12"]
-    assert (chunk_dir / "A" / "ABEF.txt").read_text().splitlines() == ["ABEF11", "ABEF12"]
+    assert (chunk_dir / "a" / "abcd.txt").read_text().splitlines() == ["ABCD11", "ABCD12"]
+    assert (chunk_dir / "a" / "abef.txt").read_text().splitlines() == ["ABEF11", "ABEF12"]
+
+
+def test_chunk_all_combinations_digits_only_falls_back(tmp_path):
+    from voucher_pilot.generator import VoucherFileManager
+
+    voucher_file = tmp_path / "all.txt"
+    voucher_file.write_text("11\n12\n21\n")
+
+    VoucherFileManager(voucher_file).chunk_file_for_all_combinations()
+
+    chunk_dir = tmp_path / "all_chunks"
+    assert (chunk_dir / "1.txt").read_text().splitlines() == ["11", "12"]
+    assert (chunk_dir / "2.txt").read_text().splitlines() == ["21"]
+
+
+def test_generate_random_accepts_exact_capacity(generator):
+    vouchers = generator.generate_random_combinations(2, 1, 40, "ab")
+    assert len(vouchers) == 40
+
+
+def test_generate_random_rejects_duplicate_charset(generator):
+    with pytest.raises(ValueError, match="unique"):
+        generator.generate_random_combinations(3, 1, 2, "aab")
+
+
+def test_generate_random_rejects_digit_overlap(generator):
+    with pytest.raises(ValueError, match="overlap"):
+        generator.generate_random_combinations(3, 1, 2, "a1")

@@ -23,6 +23,10 @@ class VoucherGenerator:
             raise ValueError("Length must be positive and digits cannot exceed length.")
         if len(charset) < num_letters or len(digits) < num_digits:
             raise ValueError("Character set is smaller than required for unique generation.")
+        if len(set(charset)) != len(charset):
+            raise ValueError("Character set must contain unique characters.")
+        if set(charset) & set(digits):
+            raise ValueError("Character set must not overlap with digits.")
 
         capacity = (
             comb(len(charset), num_letters) * comb(len(digits), num_digits) * factorial(length)
@@ -90,7 +94,14 @@ class VoucherGenerator:
 class VoucherFileManager:
     """Handles all file operations."""
 
-    RESERVED_NAMES = ("prn", "aux")
+    RESERVED_NAMES = {
+        "prn",
+        "aux",
+        "con",
+        "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }
 
     def __init__(self, output_path: Path):
         self.output_path = output_path
@@ -104,57 +115,42 @@ class VoucherFileManager:
                 count += 1
         logging.info(f"Successfully saved {count} vouchers.")
 
-    def _get_prefixes_from_file(self) -> set[str]:
-        """Read the file and return the unique leading alphabetic prefixes."""
-        logging.info(f"Extracting prefixes from {self.output_path.name}...")
-        if not self.output_path.exists():
-            return set()
-
-        prefixes = set()
-        with self.output_path.open("r") as f:
-            for line in f:
-                match = re.match(r"^([A-Za-z]+)", line.strip())
-                if match:
-                    prefixes.add(match.group(1))
-
-        if not prefixes:
-            logging.warning("Could not find alphabetic prefixes in the voucher file.")
-
-        logging.info(f"Found {len(prefixes)} unique prefixes.")
-        return prefixes
-
     def chunk_file_for_all_combinations(self):
-        """
-        Chunks the file using the specific logic for 'all' combinations,
-        which relies on knowing all possible alphabetic prefixes.
-        """
+        """Chunk an all-combinations file by its leading alphabetic prefix."""
+        if not self.output_path.exists():
+            logging.error(f"Cannot chunk file, as it does not exist: {self.output_path}")
+            return
+
         chunk_directory = self.output_path.parent / f"{self.output_path.stem}_chunks"
         chunk_directory.mkdir(exist_ok=True)
 
-        # Step 1: Extract prefixes from the file itself.
-        prefixes = self._get_prefixes_from_file()
-
-        # Step 2: Read the entire file into memory.
+        grouped_vouchers: dict[str, list[str]] = {}
         with self.output_path.open("r") as f:
-            vouchers_in_memory = f.readlines()
+            for line in f:
+                voucher = line.strip()
+                if not voucher:
+                    continue
+                match = re.match(r"^([A-Za-z]+)", voucher)
+                if match:
+                    grouped_vouchers.setdefault(match.group(1).lower(), []).append(line)
 
-        # Step 3: Iterate through the extracted prefixes and write chunk files.
-        for prefix in prefixes:
-            if not prefix:
-                continue
+        if not grouped_vouchers:
+            logging.warning(
+                "No alphabetic prefixes found; falling back to first-character chunking."
+            )
+            self.chunk_file_generic()
+            return
 
+        for prefix, lines in grouped_vouchers.items():
             letter_directory = chunk_directory / prefix[0]
             letter_directory.mkdir(parents=True, exist_ok=True)
 
             chunk_file_path = letter_directory / f"{prefix}.txt"
-            if chunk_file_path.stem.lower() in self.RESERVED_NAMES:
+            if prefix in self.RESERVED_NAMES:
                 chunk_file_path = letter_directory / f"{prefix}_res.txt"
 
-            vouchers_to_write = [v for v in vouchers_in_memory if v.strip().startswith(prefix)]
-
-            if vouchers_to_write:
-                with chunk_file_path.open("w") as out_file:
-                    out_file.writelines(vouchers_to_write)
+            with chunk_file_path.open("w") as out_file:
+                out_file.writelines(lines)
 
         logging.info("File chunking complete!")
 
@@ -204,39 +200,31 @@ class VoucherFileManager:
 
         logging.info(f"Analyzing '{self.output_path.name}' to discover prefixes for chunking...")
 
-        # Discover all unique alphabetic prefixes by reading the file
-        prefixes = set()
+        # Group by discovered alphabetic prefix in a single pass.
+        grouped_vouchers: dict[str, list[str]] = {}
         with self.output_path.open("r") as f:
             for line in f:
                 voucher = line.strip()
                 if not voucher:
                     continue
-                # Extract the non-digit part as the prefix
-                prefix = "".join(filter(str.isalpha, voucher))
+                prefix = "".join(filter(str.isalpha, voucher)).lower()
                 if prefix:
-                    prefixes.add(prefix)
+                    grouped_vouchers.setdefault(prefix, []).append(line)
 
-        logging.info(f"Discovered {len(prefixes)} unique prefixes. Now chunking file...")
+        logging.info(f"Discovered {len(grouped_vouchers)} unique prefixes. Now chunking file...")
 
-        # Now, perform the sophisticated chunking using these discovered prefixes
         chunk_directory = self.output_path.parent / f"{self.output_path.stem}_chunks"
         chunk_directory.mkdir(exist_ok=True)
 
-        with self.output_path.open("r") as f:
-            vouchers_in_memory = f.readlines()
-
-        for prefix in prefixes:
-            letter_directory = chunk_directory / prefix[0].lower()
+        for prefix, lines in grouped_vouchers.items():
+            letter_directory = chunk_directory / prefix[0]
             letter_directory.mkdir(parents=True, exist_ok=True)
 
             chunk_file_path = letter_directory / f"{prefix}.txt"
-            if chunk_file_path.stem.lower() in self.RESERVED_NAMES:
+            if prefix in self.RESERVED_NAMES:
                 chunk_file_path = letter_directory / f"{prefix}_res.txt"
 
-            vouchers_to_write = [v for v in vouchers_in_memory if v.strip().startswith(prefix)]
-
-            if vouchers_to_write:
-                with chunk_file_path.open("w") as out_file:
-                    out_file.writelines(vouchers_to_write)
+            with chunk_file_path.open("w") as out_file:
+                out_file.writelines(lines)
 
         logging.info("Analysis-based chunking complete!")

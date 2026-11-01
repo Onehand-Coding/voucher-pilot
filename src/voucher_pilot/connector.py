@@ -8,6 +8,7 @@ from fileinput import FileInput
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -52,6 +53,9 @@ class VoucherConnector:
             raise Exception("Browser not found.")
 
         logging.info("Initializing WebDriver...")
+        if self.driver_path:
+            service = Service(executable_path=self.driver_path)
+            return webdriver.Chrome(service=service, options=chrome_options)
         return webdriver.Chrome(options=chrome_options)
 
     def remove_used(self):
@@ -66,8 +70,9 @@ class VoucherConnector:
             logging.info("Done!")
 
     def connect(self, voucher):
-        logging.info(f"Trying to connect with voucher: {voucher}")
+        logging.info("Trying to connect with the next voucher...")
         driver = None  # Define driver here to ensure it's available in except blocks
+        attempted = False
         try:
             driver = self.get_driver()
 
@@ -85,6 +90,7 @@ class VoucherConnector:
             connect_button = driver.find_element(By.ID, "connectBtn")
             logging.info("Connect button found. Clicking to submit voucher...")
             connect_button.click()
+            attempted = True
 
             # Wait for the connection status to update
             logging.info("Waiting for connection status...")
@@ -100,7 +106,7 @@ class VoucherConnector:
                 driver.quit()
         except Exception as e:
             # This catches other potential errors during the process
-            logging.error(f"An unexpected error occurred while processing voucher '{voucher}': {e}")
+            logging.error(f"An unexpected error occurred while processing a voucher: {e}")
             if driver:
                 driver.quit()
         except KeyboardInterrupt:
@@ -113,8 +119,9 @@ class VoucherConnector:
             logging.info("Connection successful!")
             return driver
         finally:
-            # This will always run
-            self.used_vouchers.append(voucher)
+            # Only remove vouchers that were actually submitted.
+            if attempted:
+                self.used_vouchers.append(voucher)
 
     def connect_from_dir(self, voucher_source):
         for source in set(voucher_source.glob("*.txt")):
@@ -197,12 +204,18 @@ def get_source(voucher_dir=config.VOUCHER_DIR):
         print("Choose a starting letter to use:")
         chosen_letter = input("> ").lower().strip()
 
-        target_file = voucher_source / f"{chosen_letter}.txt"
-        if target_file.exists():
+        target_file = next(
+            (
+                item
+                for item in voucher_source.iterdir()
+                if item.is_file() and item.name.lower() == f"{chosen_letter}.txt"
+            ),
+            None,
+        )
+        if target_file:
             return target_file
-        else:
-            print(f"Error: Chunk file '{target_file.name}' not found.")
-            return None
+        print(f"Error: Chunk file '{chosen_letter}.txt' not found.")
+        return None
 
     else:
         print("This appears to be a directory of nested chunks.")
@@ -229,7 +242,9 @@ def get_source(voucher_dir=config.VOUCHER_DIR):
                 print(f"No .txt files found in {letter_directory.name}")
                 continue
 
-            matched_file = next((f for f in source_files if f.name.startswith(chosen_letter)), None)
+            matched_file = next(
+                (f for f in source_files if f.name.lower().startswith(chosen_letter)), None
+            )
 
             if matched_file:
                 return matched_file

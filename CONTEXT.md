@@ -43,12 +43,16 @@ uv build                      # build sdist/wheel
 ## Decisions
 
 - **Capacity checks use combinatorics.** Random generation capacity is
-  `C(len(charset), num_letters) * C(10, num_digits) * length!`. Pattern capacity
-  is the product of the character-set sizes for `L`, `l`, `N`, and `C` positions.
-  Literal positions do not expand the space.
-- **Chunking extracts leading alphabetic prefixes with a regex.** The previous
-  implementation depended on a numeric placeholder and referenced an undefined
-  variable, so all-combination chunking always failed.
+  `C(len(charset), num_letters) * C(10, num_digits) * length!`. The charset must
+  contain unique characters and must not contain digits, otherwise the formula
+  would overcount. Pattern capacity is the product of the character-set sizes
+  for `L`, `l`, `N`, and `C` positions. Literal positions do not expand the
+  space.
+- **Chunking extracts leading alphabetic prefixes with a regex and one pass.**
+  The previous implementation depended on a numeric placeholder and referenced
+  an undefined variable, so all-combination chunking always failed. Chunk
+  directories and file names are lowercased so `get_source` can find them.
+  Digits-only files fall back to first-character chunking.
 - **The connector uses the instance URL.** `connect_vouchers` previously read a
   nonexistent `VoucherConnector.URL` class attribute and could reference an
   unbound connector in `finally`.
@@ -56,6 +60,12 @@ uv build                      # build sdist/wheel
   any voucher testing. This is a safety gate, not authentication.
 - **Configuration stays in `.env`.** `URL`, `DRIVER_PATH`, and
   `CHROME_BINARY_PATH` are read by `config.py`; `.env.example` documents them.
+  `DRIVER_PATH` is passed to Selenium as an explicit `Service`.
+- **Installed wheels fall back to the current directory.** `pyproject.toml` is
+  not shipped in the wheel, so `find_project_root` returns `Path.cwd()` when no
+  marker is found. Runtime files are created there.
+- **Logs do not include voucher values.** The connector logs progress without
+  the candidate code so successful vouchers are not persisted in the log.
 
 ## Gotchas
 
@@ -66,6 +76,9 @@ uv build                      # build sdist/wheel
   positions has capacity 1.
 - `connect_from_dir` tests at most 10 vouchers per file in the current
   implementation.
+- A voucher is only added to `used_vouchers` after the connect button is
+  clicked. Browser startup failures therefore leave the source file untouched.
+- All-combination chunks are named by lowercase prefix: `all_chunks/a/abcd.txt`.
 - `remove_used` rewrites the current source file when testing finishes. It is a
   no-op if no source file was set.
 - Selenium is pinned to `4.8.3`; changing it may affect driver management and the

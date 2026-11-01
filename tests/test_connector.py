@@ -55,3 +55,47 @@ def test_connect_vouchers_opens_connector_url(mocker):
     open_mock.assert_called_once_with("http://example.test/")
     driver.quit.assert_called_once()
     connector.remove_used.assert_called_once()
+
+
+def test_connect_from_file_keeps_vouchers_when_browser_fails(tmp_path, mocker):
+    from voucher_pilot.connector import VoucherConnector
+
+    source = tmp_path / "vouchers.txt"
+    source.write_text("AAAA\nBBBB\n")
+    connector = VoucherConnector()
+    mocker.patch.object(connector, "get_driver", side_effect=RuntimeError("no browser"))
+
+    connector.connect_from_file(source)
+
+    assert source.read_text().splitlines() == ["AAAA", "BBBB"]
+
+
+def test_remove_used_without_source_is_safe():
+    from voucher_pilot.connector import VoucherConnector
+
+    VoucherConnector().remove_used()
+
+
+def test_get_driver_uses_configured_driver_path(mocker):
+    from voucher_pilot.connector import VoucherConnector
+
+    mocker.patch("voucher_pilot.connector.config.DRIVER_PATH", "/usr/bin/chromedriver")
+    mocker.patch("voucher_pilot.connector.config.CHROME_BINARY_PATH", "/usr/bin/test-browser")
+    mock_service = mocker.patch("voucher_pilot.connector.Service")
+    mock_chrome = mocker.patch("voucher_pilot.connector.webdriver.Chrome")
+
+    VoucherConnector().get_driver()
+
+    mock_service.assert_called_once_with(executable_path="/usr/bin/chromedriver")
+    assert mock_chrome.call_args.kwargs["service"] is mock_service.return_value
+
+
+def test_get_source_finds_uppercase_chunk(tmp_path, mocker):
+    from voucher_pilot.connector import get_source
+
+    chunk_dir = tmp_path / "chunks"
+    chunk_dir.mkdir()
+    (chunk_dir / "ABCD.txt").write_text("ABCD11\n")
+    mocker.patch("builtins.input", side_effect=["1", "abcd"])
+
+    assert get_source(tmp_path) == chunk_dir / "ABCD.txt"
