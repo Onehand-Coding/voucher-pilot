@@ -7,3 +7,6 @@ vouchers/
 .pytest_cache/
 .env
 
+dist/
+build/
+*.egg-info/

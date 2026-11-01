@@ -1,19 +1,38 @@
-import random
-import logging
 import itertools
+import logging
+import random
+import re
+from math import comb, factorial, prod
 from pathlib import Path
 from random import sample, shuffle
-from string import digits, ascii_uppercase, ascii_lowercase
+from string import ascii_lowercase, ascii_uppercase, digits
 
 
 class VoucherGenerator:
     """Generates voucher data."""
 
-    def generate_random_combinations(self, length: int, num_digits: int, count: int, charset: str) -> list[str]:
+    def generate_random_combinations(
+        self, length: int, num_digits: int, count: int, charset: str
+    ) -> list[str]:
         logging.info(f"Generating {count} random vouchers...")
+        if count <= 0:
+            raise ValueError("Count must be a positive integer.")
+
         num_letters = length - num_digits
+        if length <= 0 or num_letters < 0 or num_digits < 0:
+            raise ValueError("Length must be positive and digits cannot exceed length.")
         if len(charset) < num_letters or len(digits) < num_digits:
             raise ValueError("Character set is smaller than required for unique generation.")
+        if len(set(charset)) != len(charset):
+            raise ValueError("Character set must contain unique characters.")
+        if set(charset) & set(digits):
+            raise ValueError("Character set must not overlap with digits.")
+
+        capacity = (
+            comb(len(charset), num_letters) * comb(len(digits), num_digits) * factorial(length)
+        )
+        if count > capacity:
+            raise ValueError(f"Cannot generate {count} unique vouchers; capacity is {capacity}.")
 
         vouchers = set()
         while len(vouchers) < count:
@@ -24,22 +43,38 @@ class VoucherGenerator:
             vouchers.add("".join(voucher_list))
         return list(vouchers)
 
-    def generate_all_combinations(self, num_letters: int, num_digits: int, charset: str) -> itertools.product:
+    def generate_all_combinations(
+        self, num_letters: int, num_digits: int, charset: str
+    ) -> itertools.product:
         logging.info("Preparing iterator for all combinations...")
         letters_iter = itertools.product(charset, repeat=num_letters)
         numbers_iter = itertools.product(digits, repeat=num_digits)
-        return ("".join(l) + "".join(n) for l, n in itertools.product(letters_iter, numbers_iter))
+        return (
+            "".join(letters) + "".join(numbers)
+            for letters, numbers in itertools.product(letters_iter, numbers_iter)
+        )
 
     def generate_from_pattern(self, pattern: str, count: int) -> list[str]:
         """Generates a list of unique vouchers based on a character pattern."""
         logging.info(f"Generating {count} vouchers from pattern: {pattern}")
 
         char_map = {
-            'L': ascii_uppercase,
-            'l': ascii_lowercase,
-            'N': digits,
-            'C': ascii_lowercase + ascii_uppercase + digits,
+            "L": ascii_uppercase,
+            "l": ascii_lowercase,
+            "N": digits,
+            "C": ascii_lowercase + ascii_uppercase + digits,
         }
+
+        if count <= 0:
+            raise ValueError("Count must be a positive integer.")
+
+        capacity = prod(len(char_map[c]) for c in pattern if c in char_map)
+        if capacity == 0:
+            capacity = 1
+        if count > capacity:
+            raise ValueError(
+                f"Cannot generate {count} unique vouchers from pattern; capacity is {capacity}."
+            )
 
         vouchers = set()
         while len(vouchers) < count:
@@ -59,7 +94,14 @@ class VoucherGenerator:
 class VoucherFileManager:
     """Handles all file operations."""
 
-    RESERVED_NAMES = ("prn", "aux")
+    RESERVED_NAMES = {
+        "prn",
+        "aux",
+        "con",
+        "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }
 
     def __init__(self, output_path: Path):
         self.output_path = output_path
@@ -73,73 +115,42 @@ class VoucherFileManager:
                 count += 1
         logging.info(f"Successfully saved {count} vouchers.")
 
-    def _get_prefixes_from_file(self, num_digits_to_replace: int) -> set[str]:
-        """
-        It reads the file it just wrote to find the unique alphabetic prefixes.
-        """
-        logging.info(f"Extracting prefixes from {self.output_path.name}...")
+    def chunk_file_for_all_combinations(self):
+        """Chunk an all-combinations file by its leading alphabetic prefix."""
         if not self.output_path.exists():
-            return set()
+            logging.error(f"Cannot chunk file, as it does not exist: {self.output_path}")
+            return
 
-        # This placeholder is used to find and remove the numeric part.
-        numeric_placeholder = "1" * num_digits_to_replace
+        chunk_directory = self.output_path.parent / f"{self.output_path.stem}_chunks"
+        chunk_directory.mkdir(exist_ok=True)
 
-        prefixes = set()
+        grouped_vouchers: dict[str, list[str]] = {}
         with self.output_path.open("r") as f:
             for line in f:
                 voucher = line.strip()
                 if not voucher:
                     continue
-                # This logic is specific to the original design
-                if voucher.endswith(numeric_placeholder):
-                    prefix = voucher.replace(numeric_placeholder, "")
-                    prefixes.add(prefix)
+                match = re.match(r"^([A-Za-z]+)", voucher)
+                if match:
+                    grouped_vouchers.setdefault(match.group(1).lower(), []).append(line)
 
-        # A fallback for a more general case if the placeholder isn't found
-        if not prefixes:
-            logging.warning("Could not find placeholder, falling back to general prefix extraction.")
-            with self.output_path.open("r") as f:
-                for line in f:
-                    voucher = line.strip()
-                    if voucher:
-                        prefixes.add("".join(filter(str.isalpha, voucher)))
+        if not grouped_vouchers:
+            logging.warning(
+                "No alphabetic prefixes found; falling back to first-character chunking."
+            )
+            self.chunk_file_generic()
+            return
 
-        logging.info(f"Found {len(prefixes)} unique prefixes.")
-        return prefixes
-
-    def chunk_file_for_all_combinations(self, num_letters: int, charset: str):
-        """
-        Chunks the file using the specific logic for 'all' combinations,
-        which relies on knowing all possible alphabetic prefixes.
-        """
-        chunk_directory = self.output_path.parent / f"{self.output_path.stem}_chunks"
-        chunk_directory.mkdir(exist_ok=True)
-
-        # Step 1: Extract prefixes from the file itself.
-        prefixes = self._get_prefixes_from_file(num_digits_to_replace)
-
-        # Step 2: Read the entire file into memory.
-        with self.output_path.open("r") as f:
-            vouchers_in_memory = f.readlines()
-
-        # Step 3: Iterate through the extracted prefixes and write chunk files.
-        for prefix in prefixes:
-            if not prefix: continue
-
+        for prefix, lines in grouped_vouchers.items():
             letter_directory = chunk_directory / prefix[0]
             letter_directory.mkdir(parents=True, exist_ok=True)
 
             chunk_file_path = letter_directory / f"{prefix}.txt"
-            if chunk_file_path.stem.lower() in self.RESERVED_NAMES:
+            if prefix in self.RESERVED_NAMES:
                 chunk_file_path = letter_directory / f"{prefix}_res.txt"
 
-            vouchers_to_write = [
-                v for v in vouchers_in_memory if v.strip().startswith(prefix)
-            ]
-
-            if vouchers_to_write:
-                with chunk_file_path.open("w") as out_file:
-                    out_file.writelines(vouchers_to_write)
+            with chunk_file_path.open("w") as out_file:
+                out_file.writelines(lines)
 
         logging.info("File chunking complete!")
 
@@ -166,7 +177,7 @@ class VoucherFileManager:
                 first_char = voucher[0].lower()
                 if first_char not in grouped_vouchers:
                     grouped_vouchers[first_char] = []
-                grouped_vouchers[first_char].append(line) # Keep the newline
+                grouped_vouchers[first_char].append(line)  # Keep the newline
 
         # Write each group to its own file
         for first_char, lines in grouped_vouchers.items():
@@ -189,39 +200,38 @@ class VoucherFileManager:
 
         logging.info(f"Analyzing '{self.output_path.name}' to discover prefixes for chunking...")
 
-        # Discover all unique alphabetic prefixes by reading the file
-        prefixes = set()
+        # Group by discovered alphabetic prefix in a single pass.
+        grouped_vouchers: dict[str, list[str]] = {}
         with self.output_path.open("r") as f:
             for line in f:
                 voucher = line.strip()
                 if not voucher:
                     continue
-                # Extract the non-digit part as the prefix
-                prefix = "".join(filter(str.isalpha, voucher))
+                prefix = "".join(filter(str.isalpha, voucher)).lower()
                 if prefix:
-                    prefixes.add(prefix)
+                    grouped_vouchers.setdefault(prefix, []).append(line)
 
-        logging.info(f"Discovered {len(prefixes)} unique prefixes. Now chunking file...")
+        if not grouped_vouchers:
+            logging.warning(
+                "No alphabetic prefixes found; falling back to first-character chunking."
+            )
+            self.chunk_file_generic()
+            return
 
-        # Now, perform the sophisticated chunking using these discovered prefixes
+        logging.info(f"Discovered {len(grouped_vouchers)} unique prefixes. Now chunking file...")
+
         chunk_directory = self.output_path.parent / f"{self.output_path.stem}_chunks"
         chunk_directory.mkdir(exist_ok=True)
 
-        with self.output_path.open("r") as f:
-            vouchers_in_memory = f.readlines()
-
-        for prefix in prefixes:
-            letter_directory = chunk_directory / prefix[0].lower()
+        for prefix, lines in grouped_vouchers.items():
+            letter_directory = chunk_directory / prefix[0]
             letter_directory.mkdir(parents=True, exist_ok=True)
 
             chunk_file_path = letter_directory / f"{prefix}.txt"
-            if chunk_file_path.stem.lower() in self.RESERVED_NAMES:
+            if prefix in self.RESERVED_NAMES:
                 chunk_file_path = letter_directory / f"{prefix}_res.txt"
 
-            vouchers_to_write = [v for v in vouchers_in_memory if v.strip().startswith(prefix)]
-
-            if vouchers_to_write:
-                with chunk_file_path.open("w") as out_file:
-                    out_file.writelines(vouchers_to_write)
+            with chunk_file_path.open("w") as out_file:
+                out_file.writelines(lines)
 
         logging.info("Analysis-based chunking complete!")
